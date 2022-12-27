@@ -1,8 +1,16 @@
 use reqwest;
+
 use tokio::{macros, spawn};
 use futures::executor::block_on;
+use log::{debug, LevelFilter};
+use env_logger::{Builder, Target};
+use std::env;
+use std::io::Write;
+use chrono::Local;
 
 use clap::{Parser, Subcommand};
+use clap::builder::TypedValueParser;
+use env_logger::Target::Stdout;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -17,28 +25,42 @@ struct Cli {
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
-    let cli = Cli::parse();
-    println!("{:?}", cli.websites);
+    Builder::from_default_env()
+        .format(|buf, record| {
+            writeln!(buf,
+                     "{} [{}] - {}",
+                     Local::now().format("%Y-%m-%dT%H:%M:%S"),
+                     record.level(),
+                     record.args()
+            )
+        })
+        .target(Stdout)
+        .init();
 
-    println!("---Beginning scraper---");
+    let cli = Cli::parse();
+
+    debug!("Websites are {:?}", cli.websites);
+    debug!("---Beginning scraper---");
+
     let join_handle = tokio::spawn(async move {
         // Process each socket concurrently.
         scrape().await;
     });
+    
     // Wait for the async functions to complete.
     join_handle.await.unwrap()
 }
 
 async fn scrape() -> Result<(), reqwest::Error> {
-let body = (match reqwest::get("https://www.google.com/")
+    let body = (match reqwest::get("https://www.google.com/")
         .await {
-            Ok(res) => res.text().await?,
-            Err(e) => {
-                e.to_string()
-            },
-        });
+        Ok(res) => res.text().await?,
+        Err(e) => {
+            e.to_string()
+        },
+    });
 
-    println!("body = {:?}", body);
-    println!("---End of scraper---");
+    // debug!("body = {:?}", body);
+    debug!("---End of scraper---");
     Ok(())
 }
