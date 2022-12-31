@@ -1,16 +1,22 @@
+use std::collections::HashSet;
 use reqwest;
 
+use serde::{Deserialize, Serialize};
 use tokio::{macros, spawn};
 use futures::executor::block_on;
 use log::{debug, LevelFilter};
 use env_logger::{Builder, Target};
-use std::env;
+use std::{env, iter};
 use std::io::Write;
 use chrono::Local;
+use scraper::{Html, Selector};
 
 use clap::{Parser, Subcommand};
 use clap::builder::TypedValueParser;
+use color_eyre::eyre;
+use color_eyre::eyre::eyre;
 use env_logger::Target::Stdout;
+use futures::TryFutureExt;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -24,7 +30,7 @@ struct Cli {
 }
 
 #[tokio::main(flavor = "multi_thread")]
-async fn main() {
+async fn main() -> eyre::Result<()> {
     Builder::from_default_env()
         .format(|buf, record| {
             writeln!(buf,
@@ -40,27 +46,66 @@ async fn main() {
     let cli = Cli::parse();
 
     debug!("Websites are {:?}", cli.websites);
-    debug!("---Beginning scraper---");
 
-    let join_handle = tokio::spawn(async move {
-        // Process each socket concurrently.
-        scrape().await;
-    });
-    
-    // Wait for the async functions to complete.
-    join_handle.await.unwrap()
+    for website in cli.websites {
+        // TODO flip these loops lmao
+    //     let join_handle = tokio::spawn(async move {
+    //         // Process each socket concurrently.
+            scrape(website).await?;
+        // });
+
+        // Wait for the async functions to complete.
+        // join_handle.await.unwrap()
+    }
+    Ok(())
 }
 
-async fn scrape() -> Result<(), reqwest::Error> {
-    let body = (match reqwest::get("https://www.google.com/")
-        .await {
-        Ok(res) => res.text().await?,
-        Err(e) => {
-            e.to_string()
-        },
-    });
+#[derive(Deserialize)]
+#[derive(Debug)]
+struct CanonicalUrl {
+    canonical_url: String,
+}
 
-    // debug!("body = {:?}", body);
-    debug!("---End of scraper---");
+async fn scrape(homepage_url: String) -> eyre::Result<()> {
+    let urls = get_blog_urls(homepage_url).await?;
+    debug!("Urls are {:?}", urls);
+    // Get posts' content.
     Ok(())
+}
+
+async fn get_blog_urls(homepage_url: String) -> eyre::Result<HashSet<String>> {
+    debug!("Scraping {}", homepage_url);
+
+    // Current page number.
+    let mut page_offset = 0;
+    // Pages to request on each iteration.
+    let page_limit = 12;
+
+    // Contains the hashset of article URLs.
+    let mut seen_urls = HashSet::new();
+
+    loop {
+        // Get content.
+        let current_request_url = format!("{}api/v1/archive?sort=new&search=&offset={}&limit={}", homepage_url, page_offset, page_limit);
+        debug!("current_request_url = {}", &current_request_url);
+
+        let page_urls = reqwest::get(&current_request_url)
+            .await?.
+            json::<Vec<CanonicalUrl>>()
+            .await?;
+        debug!("body = {:?}", &page_urls);
+
+        // Add page URLs.
+        // Exit on empty query.
+        if page_urls.is_empty() {
+            break;
+        }
+        seen_urls.extend(page_urls.into_iter().map(|it| it.canonical_url));
+
+        page_offset += page_limit;
+    }
+    debug!("seen_urls = {seen_urls:?}");
+
+    debug!("Finished scraping {}", homepage_url);
+    Ok(seen_urls)
 }
