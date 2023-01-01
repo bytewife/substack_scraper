@@ -11,10 +11,13 @@ clap = { version = "4.0.32", features = ["derive"] }
 color-eyre = "0.6.2"
 derive = "1.0.0"
 env_logger = "0.10.0"
+fancy-regex = "0.10.0"
 features = "0.10.0"
 futures = "0.3.25"
 log = "0.4.17"
+regex = "1.7.0"
 reqwest = { version = "0.11.13", features = ["json"] }
 scraper = "0.14.0"
 serde = { version = "1.0.152", features = ["derive"] }
 tokio = { version = "1.23.0", features = ["full"] }
+voca_rs = "1.15.2"
