@@ -1,14 +1,14 @@
 #![feature(file_create_new)]
 
 use reqwest;
-
+use html2text::from_read;
 use serde::{Deserialize, Serialize};
 use voca_rs::strip::strip_tags;
 use tokio::{macros, spawn};
 use futures::executor::block_on;
 use log::{debug, LevelFilter};
 use env_logger::{Builder, Target};
-use std::{env, iter};
+use std::{env, fs, iter};
 use std::collections::HashSet;
 use std::io::Write;
 use std::path::Path;
@@ -22,6 +22,7 @@ use color_eyre::eyre::eyre;
 use env_logger::Target::Stdout;
 use futures::TryFutureExt;
 use fancy_regex::Regex;
+use reqwest::Url;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -51,8 +52,13 @@ async fn main() -> eyre::Result<()> {
     let cli = Cli::parse();
 
     debug!("Websites are {:?}", cli.websites);
+    //Convert to Url type
+    let websites = cli.websites.into_iter().map(|s|
+        Url::parse(&s)
+            .unwrap())
+            .collect::<Vec<Url>>();
 
-    for website in cli.websites {
+    for website in websites {
         // TODO flip these loops lmao
     //     let join_handle = tokio::spawn(async move {
     //         // Process each socket concurrently.
@@ -68,60 +74,47 @@ async fn main() -> eyre::Result<()> {
 #[derive(Deserialize)]
 #[derive(Debug)]
 struct CanonicalUrl {
-    canonical_url: String,
+    canonical_url: Url,
 }
 
-async fn scrape(homepage_url: &String) -> eyre::Result<()> {
+async fn scrape(homepage_url: &Url) -> eyre::Result<()> {
     let post_urls = get_post_urls(homepage_url).await?;
 
     // Result.
-    let mut url_to_posts: Vec<(&String, Vec<String>)> = Vec::new();
+    let mut urls_to_post_content: Vec<(&Url, Vec<String>)> = Vec::new();
 
     // Get posts' content.
     for mut post_url in &post_urls {
         let post = get_post_content(&post_url).await?;
-        url_to_posts.push((&post_url, post));
-        // let post = get_post_content("https://etiennefd.substack.com/p/how-to-slow-down-progress-according".to_string()).await?;
+        urls_to_post_content.push((&post_url, post));
     }
 
-    let blog_folder_name = Path::new("blogs").join(&homepage_url.replace("https://", "").replace("/", "-"));
-
-    // Check that the url filenames do not exist.
-    for (url, _) in &url_to_posts {
-        let filename = url_to_filename(url);
-        if std::path::Path::new(&blog_folder_name).join(&filename).exists() {
-            return Err(eyre!("File {} already exists. Please delete it before running this program again.", filename));
-        }
-    }
+    let blog_folder_path = Path::new("blogs").join(Path::new(&homepage_url.host_str().unwrap()));
 
     // TODO fix this.
-    // Write to files, overwriting if exists.
+    // Write to files.
     // Create folder if it doesn't exist.
-        std::fs::create_dir_all(&blog_folder_name)?;
-    for (url, post) in url_to_posts {
-        let filename = url_to_filename(&url);
-        let path = std::path::Path::new(&blog_folder_name).join(filename);
-        let mut file = std::fs::File::create_new(path)?;
-        for line in post {
-            file.write_all(line.as_bytes())?;
+    // std::fs::create_dir_all(&blog_folder_name)?;
+    for (url, post) in urls_to_post_content {
+        let path = Path::new(url.path());
+        let path = path.strip_prefix("/").unwrap_or(path);
+        let path = blog_folder_path.join(path);
+        if let Some(dir) = path.parent() {
+            fs_err::create_dir_all(dir)?;
         }
+        fs_err::write(&path, post.join("\n").as_bytes())?;
     }
-
     Ok(())
 }
 
-fn url_to_filename(url: &String) -> String {
-    return url.to_owned() + ".txt";
-}
-
 /// Get the text content of a post.
-async fn get_post_content(url: &String) -> eyre::Result<Vec<String>> {
+async fn get_post_content(url: &Url) -> eyre::Result<Vec<String>> {
     // TODO wait & retry getting content when hitting rate limit.
     println!("url is {:?}", url);
-    let body = reqwest::get(url).await?.text().await?;
+    let body = reqwest::get(url.clone()).await?.text().await?;
     let fragment = Html::parse_fragment(&body);
     // The following selector looks for <p> elements with the .available-content parent.
-    let selector = Selector::parse(".available-content p").unwrap();
+    let selector = Selector::parse(".available-content p:not(.button-wrapper)").unwrap();
     let mut result = Vec::new();
     for it in fragment.select(&selector) {
         let temp = it.inner_html();
@@ -136,15 +129,15 @@ fn cleanup_content(input: &String) -> String {
     // Replace in-paragraph footnote links with "". Assumes that the following regex works.
     let regex_footnote = Regex::new(r">\d</a>").unwrap();
     let temp = regex_footnote.replace_all(&input, "></a>").to_string();
-
     // Strip HTML tags.
     let temp = strip_tags(&temp);
-
-    // Replace &nbsp; with space.
-    temp.replace("&nbsp;", " ")
+    // Remove HTML encoding artifacts like ;nbsp;
+    let temp = from_read(temp.as_bytes(), 100);
+    let temp = temp.replace("\n", " ");
+    temp
 }
 
-async fn get_post_urls(homepage_url: &String) -> eyre::Result<HashSet<String>> {
+async fn get_post_urls(homepage_url: &Url) -> eyre::Result<HashSet<Url>> {
     debug!("Scraping {}", homepage_url);
 
     // Current page number.
