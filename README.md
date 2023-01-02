@@ -11,7 +11,7 @@ cargo run -- -w <BLOGS>
 Example:
 ```sh
 ## Example:
-cargo run -- -w <BLOGS> "https://substack.thewebscraping.club/ https://etiennefd.substack.com/"
+cargo run -- -w "https://substack.thewebscraping.club/ https://etiennefd.substack.com/"
 ```
 For debug messages, set envvar `RUST_LOG=debug`
 
