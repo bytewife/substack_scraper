@@ -59,16 +59,14 @@ async fn main() -> eyre::Result<()> {
             .unwrap())
             .collect::<Vec<Url>>();
 
-    for website in websites {
-        // TODO flip these loops lmao
-    //     let join_handle = tokio::spawn(async move {
-    //         // Process each socket concurrently.
-            scrape(&website).await?;
-        // });
+    let join_handle = tokio::spawn(async move {
+        for website in websites {
+            scrape(&website).await.expect(fmt!("Failed to scrape {}", website));
+        }
+    });
 
-        // Wait for the async functions to complete.
-        // join_handle.await.unwrap()
-    }
+    // Wait for the async functions to complete.
+    join_handle.await.unwrap();
     Ok(())
 }
 
