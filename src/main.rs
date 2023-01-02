@@ -53,20 +53,22 @@ async fn main() -> eyre::Result<()> {
     let cli = Cli::parse();
 
     debug!("Websites are {:?}", cli.websites);
-    //Convert to Url type
-    let websites = cli.websites.into_iter().map(|s|
-        Url::parse(&s)
-            .unwrap())
+    // Convert to Url type
+    // Remove websites that are empty.
+    let websites = cli.websites.iter().filter(|x| !x.is_empty());
+
+    let websites = websites.into_iter().map(|s|
+        Url::parse(&s).unwrap())
             .collect::<Vec<Url>>();
 
-    let join_handle = tokio::spawn(async move {
-        for website in websites {
-            scrape(&website).await.expect(fmt!("Failed to scrape {}", website));
-        }
-    });
+    // let join_handle = tokio::spawn(async move {
+    for website in websites {
+        scrape(&website).await.expect(&*format!("Failed to scrape {}", website));
+    }
+    // });
 
     // Wait for the async functions to complete.
-    join_handle.await.unwrap();
+    // join_handle.await.unwrap();
     Ok(())
 }
 
@@ -105,12 +107,12 @@ async fn scrape(homepage_url: &Url) -> eyre::Result<()> {
 /// Get the text content of a post.
 async fn get_post_content(url: &Url) -> eyre::Result<Vec<String>> {
     // TODO wait & retry getting content when hitting rate limit.
-    println!("url is {:?}", url);
+    debug!("url is {:?}", url);
 
     let mut result = Vec::new();
     loop {
         let headers = reqwest::get(url.clone()).await?;
-        println!("headers are {:?}", headers);
+        debug!("headers are {:?}", headers);
         let mut body = headers.text().await?;
 
         let fragment = Html::parse_fragment(&body);
@@ -123,9 +125,9 @@ async fn get_post_content(url: &Url) -> eyre::Result<Vec<String>> {
         if !result.is_empty() { break };
         // Wait on rate limiter.
         sleep(std::time::Duration::from_secs(1));
-        println!("Retrying...");
+        debug!("Retrying...");
     }
-    println!("{:?}", result);
+    debug!("{:?}", result);
     Ok(result)
 }
 
