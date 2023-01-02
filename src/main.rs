@@ -12,6 +12,7 @@ use std::{env, fs, iter};
 use std::collections::HashSet;
 use std::io::Write;
 use std::path::Path;
+use std::thread::sleep;
 use chrono::Local;
 use scraper::{Html, Selector};
 
@@ -80,7 +81,6 @@ struct CanonicalUrl {
 async fn scrape(homepage_url: &Url) -> eyre::Result<()> {
     let post_urls = get_post_urls(homepage_url).await?;
 
-    // Result.
     let mut urls_to_post_content: Vec<(&Url, Vec<String>)> = Vec::new();
 
     // Get posts' content.
@@ -91,10 +91,7 @@ async fn scrape(homepage_url: &Url) -> eyre::Result<()> {
 
     let blog_folder_path = Path::new("blogs").join(Path::new(&homepage_url.host_str().unwrap()));
 
-    // TODO fix this.
     // Write to files.
-    // Create folder if it doesn't exist.
-    // std::fs::create_dir_all(&blog_folder_name)?;
     for (url, post) in urls_to_post_content {
         let path = Path::new(url.path());
         let path = path.strip_prefix("/").unwrap_or(path);
@@ -111,15 +108,25 @@ async fn scrape(homepage_url: &Url) -> eyre::Result<()> {
 async fn get_post_content(url: &Url) -> eyre::Result<Vec<String>> {
     // TODO wait & retry getting content when hitting rate limit.
     println!("url is {:?}", url);
-    let body = reqwest::get(url.clone()).await?.text().await?;
-    let fragment = Html::parse_fragment(&body);
-    // The following selector looks for <p> elements with the .available-content parent.
-    let selector = Selector::parse(".available-content p:not(.button-wrapper)").unwrap();
+
     let mut result = Vec::new();
-    for it in fragment.select(&selector) {
-        let temp = it.inner_html();
-        result.push(cleanup_content(&temp));
-    };
+    loop {
+        let headers = reqwest::get(url.clone()).await?;
+        println!("headers are {:?}", headers);
+        let mut body = headers.text().await?;
+
+        let fragment = Html::parse_fragment(&body);
+        // The following selector looks for <p> elements with the .available-content parent.
+        let selector = Selector::parse(".available-content p:not(.button-wrapper)").unwrap();
+        for it in fragment.select(&selector) {
+            let temp = it.inner_html();
+            result.push(cleanup_content(&temp));
+        };
+        if !result.is_empty() { break };
+        // Wait on rate limiter.
+        sleep(std::time::Duration::from_secs(1));
+        println!("Retrying...");
+    }
     println!("{:?}", result);
     Ok(result)
 }
