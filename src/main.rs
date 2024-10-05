@@ -1,5 +1,3 @@
-#![feature(file_create_new)]
-
 use reqwest;
 use html2text::from_read;
 use serde::{Deserialize, Serialize};
